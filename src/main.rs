@@ -4,14 +4,18 @@ mod args;
 
 use args::Args;
 use image::{
-    imageops::FilterType::Triangle, io::Reader, DynamicImage, GenericImageView, ImageFormat,
+    imageops::FilterType::Triangle, io::Reader, DynamicImage, GenericImageView, ImageFormat, ImageError,
 };
-use std::{fs::File, io::BufReader};
+// use std::{fs::File, io::BufReader};
 
 #[derive(Debug)]
 enum ImageDataErr {
     DifferentImageFormats,
     BufferTooSmall,
+    UnableToReadImageFromPath(std::io::Error),
+    UnableToDecodeImage(ImageError),
+    UnableToSaveImage(ImageError),
+    UnableToFormatImage(String)
 }
 
 struct FloatingImg {
@@ -45,8 +49,8 @@ impl FloatingImg {
 
 fn main() -> Result<(), ImageDataErr> {
     let args = Args::new();
-    let (img_1, img_format_1) = find_image_from_path(args.img_1);
-    let (img_2, img_format_2) = find_image_from_path(args.img_2);
+    let (img_1, img_format_1) = find_image_from_path(args.img_1)?;
+    let (img_2, img_format_2) = find_image_from_path(args.img_2)?;
 
     if img_format_1 != img_format_2 {
         println!("Image format are not the same");
@@ -59,25 +63,42 @@ fn main() -> Result<(), ImageDataErr> {
     let combined_data = combine_images(img_1, img_2);
     output.set_data(combined_data)?;
 
-    image::save_buffer_with_format(
+    if let Err(e) = image::save_buffer_with_format(
         output.name,
         &output.data,
         output.width,
         output.height,
         image::ColorType::Rgba8,
         img_format_1,
-    )
-    .unwrap();
+    ) {
+        Err(ImageDataErr::UnableToSaveImage(e))
+    } else {
 
-    Ok(())
+        Ok(())
+    }
+
 
 }
 
-fn find_image_from_path(path: String) -> (DynamicImage, ImageFormat) {
-    let image_reader: Reader<BufReader<File>> = Reader::open(path).unwrap();
-    let image_format: ImageFormat = image_reader.format().unwrap();
-    let image: DynamicImage = image_reader.decode().unwrap();
-    (image, image_format)
+fn find_image_from_path(path: String) -> Result<(DynamicImage, ImageFormat), ImageDataErr> {
+    // let image_reader: Reader<BufReader<File>> = Reader::open(path).unwrap();
+    match Reader::open(&path) {
+        Ok(image_reader) => {
+            // let image_format: ImageFormat = image_reader.format().unwrap();
+            if let Some(image_format) = image_reader.format() {
+                match image_reader.decode() {
+                    Ok(image) => Ok((image, image_format)),
+                    Err(e) => Err(ImageDataErr::UnableToDecodeImage(e))
+                }
+            } else {
+                return Err(ImageDataErr::UnableToFormatImage(path))
+            }
+            // (image, image_format)
+        },
+        Err(e) => {
+            Err(ImageDataErr::UnableToReadImageFromPath(e))
+        },
+    }
 }
 
 fn get_smallest_dimension(dim_1: (u32, u32), dim_2: (u32, u32)) -> (u32, u32) {
